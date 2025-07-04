@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-type Status = "idle" | "recording" | "transcribing" | "generating";
+type Status = "idle" | "recording" | "finalizing" | "generating";
 
 type AudioDevice = { label: string; value: string };
 
@@ -62,6 +62,17 @@ function formatToolLabel(name: string, args: Record<string, unknown>): string {
   if (name === "set_volume" && args.level != null)
     return `${base}: ${args.level}%`;
   return base;
+}
+
+/** Convert Float32 audio samples [-1, 1] to PCM signed 16-bit little-endian. */
+function float32ToPcmS16le(input: Float32Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(input.length * 2);
+  const view = new DataView(buffer);
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buffer;
 }
 
 function useAudioDevices() {
@@ -109,10 +120,44 @@ export function Transcription() {
 
   const devices = useAudioDevices();
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
 
   useEffect(() => {
+    const removeDelta = window.electron.onTranscriptionDelta((text) => {
+      setTranscript((prev) => prev + text);
+    });
+
+    const removeDone = window.electron.onTranscriptionDone(async (text) => {
+      setTranscript(text);
+
+      if (!text.trim()) {
+        setError("No speech detected. Try recording again.");
+        setStatus("idle");
+        return;
+      }
+
+      setAiResponse("");
+      setToolActions([]);
+      setStatus("generating");
+
+      try {
+        await window.electron.chatWithMistral(text);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Chat failed.");
+      } finally {
+        setStatus("idle");
+      }
+    });
+
+    const removeTranscriptionError = window.electron.onTranscriptionError(
+      (msg) => {
+        setError(msg);
+        setStatus("idle");
+      },
+    );
+
     const removeChatChunk = window.electron.onChatChunk((chunk) => {
       setAiResponse((prev) => prev + chunk);
     });
@@ -131,7 +176,6 @@ export function Transcription() {
 
     const removeToolResult = window.electron.onToolResult((data) => {
       setToolActions((prev) => {
-        // Find the last action with this name that is still running
         const idx = prev.findLastIndex(
           (a) => a.name === data.name && a.status === "running",
         );
@@ -147,14 +191,31 @@ export function Transcription() {
     });
 
     return () => {
+      removeDelta();
+      removeDone();
+      removeTranscriptionError();
       removeChatChunk();
       removeToolExecuting();
       removeToolResult();
     };
   }, []);
 
+  const cleanupAudio = useCallback(() => {
+    processorRef.current?.disconnect();
+    processorRef.current = null;
+
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+  }, []);
+
   const startRecording = useCallback(async () => {
     setError(null);
+    setTranscript("");
 
     const audioConstraints: MediaTrackConstraints = selectedDeviceId
       ? { deviceId: { exact: selectedDeviceId } }
@@ -172,49 +233,47 @@ export function Transcription() {
       return;
     }
 
-    const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
-    chunksRef.current = [];
+    streamRef.current = stream;
 
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-
-    recorder.onstop = async () => {
+    try {
+      await window.electron.startTranscription();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to start transcription",
+      );
       stream.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      return;
+    }
 
-      const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-      const buffer = await blob.arrayBuffer();
+    const audioContext = new AudioContext({ sampleRate: 16000 });
+    audioContextRef.current = audioContext;
 
-      setStatus("transcribing");
-      try {
-        const text = await window.electron.transcribeAudio(buffer);
-        setTranscript(text);
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    processorRef.current = processor;
 
-        if (!text.trim()) {
-          setError("No speech detected. Try recording again.");
-          return;
-        }
-
-        setAiResponse("");
-        setToolActions([]);
-        setStatus("generating");
-        await window.electron.chatWithMistral(text);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Transcription failed.");
-      } finally {
-        setStatus("idle");
-      }
+    processor.onaudioprocess = (e) => {
+      const input = e.inputBuffer.getChannelData(0);
+      window.electron.sendAudioChunk(float32ToPcmS16le(input));
     };
 
-    mediaRecorderRef.current = recorder;
-    recorder.start();
-    setStatus("recording");
-  }, [selectedDeviceId]);
+    source.connect(processor);
+    const silentGain = audioContext.createGain();
+    silentGain.gain.value = 0;
+    processor.connect(silentGain);
+    silentGain.connect(audioContext.destination);
 
-  const stopRecording = useCallback(() => {
-    mediaRecorderRef.current?.stop();
-    mediaRecorderRef.current = null;
-  }, []);
+    setStatus("recording");
+    window.electron.setRecordingGlow(true);
+  }, [selectedDeviceId, cleanupAudio]);
+
+  const stopRecording = useCallback(async () => {
+    cleanupAudio();
+    window.electron.setRecordingGlow(false);
+    setStatus("finalizing");
+    await window.electron.stopTranscription();
+  }, [cleanupAudio]);
 
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
@@ -257,9 +316,9 @@ export function Transcription() {
               <Button
                 size="lg"
                 onClick={startRecording}
-                disabled={status === "transcribing" || status === "generating"}
+                disabled={status === "finalizing" || status === "generating"}
               >
-                {status === "transcribing" || status === "generating" ? (
+                {status === "finalizing" || status === "generating" ? (
                   <LoaderIcon
                     data-icon="inline-start"
                     className="animate-spin"
@@ -267,8 +326,8 @@ export function Transcription() {
                 ) : (
                   <MicIcon data-icon="inline-start" />
                 )}
-                {status === "transcribing"
-                  ? "Transcribing..."
+                {status === "finalizing"
+                  ? "Finalizing..."
                   : status === "generating"
                     ? "Generating..."
                     : "Start Recording"}
@@ -278,20 +337,22 @@ export function Transcription() {
             {status === "recording" && (
               <span className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span className="size-2 animate-pulse rounded-full bg-destructive" />
-                Recording...
+                Listening...
               </span>
             )}
           </div>
 
           {error && <p className="text-xs text-destructive">{error}</p>}
 
-          {transcript && (
+          {(transcript || status === "recording") && (
             <div className="flex flex-col gap-1">
               <p className="text-xs font-medium text-muted-foreground">
                 You said:
               </p>
               <p className="rounded-md bg-muted px-3 py-2 text-sm italic">
-                {transcript}
+                {transcript || (
+                  <span className="text-muted-foreground">Listening...</span>
+                )}
               </p>
             </div>
           )}

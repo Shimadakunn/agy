@@ -1,17 +1,91 @@
 import "dotenv/config";
-import { app, BrowserWindow, ipcMain } from "electron";
-import fs from "node:fs/promises";
-import os from "node:os";
+import { app, BrowserWindow, ipcMain, screen } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Mistral } from "@mistralai/mistralai";
 import type { ChatCompletionStreamRequestMessages } from "@mistralai/mistralai/models/components/chatcompletionstreamrequest.js";
 import type { ToolCall } from "@mistralai/mistralai/models/components/toolcall.js";
+import {
+  AudioEncoding,
+  RealtimeTranscription,
+} from "@mistralai/mistralai/extra/realtime";
+import type { RealtimeConnection } from "@mistralai/mistralai/extra/realtime";
 import { toolDefinitions, executeTool } from "./tools.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | null = null;
+let glowWindow: BrowserWindow | null = null;
+
+const GLOW_HTML = /* html */ `<!DOCTYPE html>
+<html>
+<head>
+<style>
+  @property --glow-angle {
+    syntax: "<angle>";
+    initial-value: 0deg;
+    inherits: false;
+  }
+
+  * { margin: 0; padding: 0; }
+
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  .glow {
+    position: fixed;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 500ms ease;
+    --glow-size: 28px;
+    --glow-spread: 90px;
+    --glow-radius: 16px;
+  }
+
+  .glow.active { opacity: 1; }
+
+  .glow::before,
+  .glow::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: var(--glow-radius);
+    background: conic-gradient(
+      from var(--glow-angle),
+      #ff3366, #ff6633, #ffcc33, #33ff99,
+      #33ccff, #6633ff, #cc33ff, #ff3366
+    );
+    mask:
+      linear-gradient(#000, #000) content-box exclude,
+      linear-gradient(#000, #000);
+    padding: var(--glow-size);
+    opacity: 0.5;
+    animation: glow-spin 3s linear infinite;
+  }
+
+  .glow::after {
+    filter: blur(var(--glow-spread));
+    opacity: 0.35;
+  }
+
+  @keyframes glow-spin {
+    to { --glow-angle: 360deg; }
+  }
+</style>
+</head>
+<body>
+  <div class="glow" id="glow"></div>
+  <script>
+    window.electron.onRecordingGlow((active) => {
+      document.getElementById("glow").classList.toggle("active", active);
+    });
+  </script>
+</body>
+</html>`;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -27,9 +101,51 @@ function createWindow() {
   else mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
 }
 
+function createGlowWindow() {
+  const { x, y, width, height } = screen.getPrimaryDisplay().bounds;
+
+  glowWindow = new BrowserWindow({
+    x,
+    y,
+    width,
+    height,
+    transparent: true,
+    frame: false,
+    hasShadow: false,
+    skipTaskbar: true,
+    resizable: false,
+    focusable: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.mjs"),
+    },
+  });
+
+  glowWindow.setAlwaysOnTop(true, "screen-saver");
+  glowWindow.setIgnoreMouseEvents(true);
+  glowWindow.setVisibleOnAllWorkspaces(true);
+
+  glowWindow.loadURL(
+    `data:text/html;charset=utf-8,${encodeURIComponent(GLOW_HTML)}`,
+  );
+
+  glowWindow.once("ready-to-show", () => glowWindow!.showInactive());
+
+  glowWindow.on("closed", () => {
+    glowWindow = null;
+  });
+}
+
 const mistral = new Mistral({
   apiKey: process.env.MISTRAL_API_KEY ?? "",
 });
+
+const realtimeClient = new RealtimeTranscription({
+  apiKey: process.env.MISTRAL_API_KEY ?? "",
+  serverURL: "wss://api.mistral.ai",
+});
+
+let activeConnection: RealtimeConnection | null = null;
 
 const SYSTEM_PROMPT = `You are an AI desktop assistant running on macOS. You can control the user's computer using the provided tools.
 
@@ -39,20 +155,63 @@ Be concise in your responses. After performing an action, briefly confirm what y
 
 const MAX_AGENTIC_ITERATIONS = 10;
 
-ipcMain.handle("transcribe-audio", async (_event, audioBuffer: ArrayBuffer) => {
-  const tmpDir = os.tmpdir();
-  const filePath = path.join(tmpDir, `recording-${Date.now()}.webm`);
-  await fs.writeFile(filePath, new Uint8Array(audioBuffer));
-  console.log("[transcribe] Audio saved to:", filePath);
+ipcMain.handle("start-transcription", async () => {
+  if (activeConnection && !activeConnection.isClosed)
+    await activeConnection.close();
 
-  const response = await mistral.audio.transcriptions.complete({
-    model: "voxtral-mini-latest",
-    file: {
-      fileName: "recording.webm",
-      content: new Uint8Array(audioBuffer),
+  activeConnection = await realtimeClient.connect(
+    "voxtral-mini-transcribe-realtime-2602",
+    {
+      audioFormat: {
+        encoding: AudioEncoding.PcmS16le,
+        sampleRate: 16000,
+      },
     },
-  });
-  return response.text;
+  );
+
+  const conn = activeConnection;
+  (async () => {
+    try {
+      for await (const event of conn) {
+        if (!mainWindow) break;
+        if (event.type === "transcription.text.delta" && "text" in event)
+          mainWindow.webContents.send("transcription-delta", event.text);
+        else if (event.type === "transcription.done" && "text" in event)
+          mainWindow.webContents.send("transcription-done", event.text);
+        else if (event.type === "error") {
+          const msg =
+            "error" in event && event.error
+              ? typeof event.error.message === "string"
+                ? event.error.message
+                : JSON.stringify(event.error.message)
+              : "Transcription error";
+          mainWindow.webContents.send("transcription-error", msg);
+          break;
+        }
+      }
+    } catch (err) {
+      mainWindow?.webContents.send(
+        "transcription-error",
+        err instanceof Error ? err.message : "Transcription failed",
+      );
+    } finally {
+      if (!conn.isClosed) await conn.close();
+      if (activeConnection === conn) activeConnection = null;
+    }
+  })();
+});
+
+ipcMain.on("send-audio-chunk", (_event, chunk: ArrayBuffer) => {
+  if (activeConnection && !activeConnection.isClosed) {
+    activeConnection.sendAudio(new Uint8Array(chunk)).catch((err) => {
+      console.error("[realtime] Failed to send audio chunk:", err);
+    });
+  }
+});
+
+ipcMain.handle("stop-transcription", async () => {
+  if (activeConnection && !activeConnection.isClosed)
+    await activeConnection.endAudio();
 });
 
 function parseToolCallArgs(
@@ -172,11 +331,19 @@ ipcMain.handle("chat-with-mistral", async (_event, prompt: string) => {
   }
 });
 
+ipcMain.handle("set-recording-glow", (_event, active: boolean) => {
+  glowWindow?.webContents.send("recording-glow", active);
+});
+
 app.whenReady().then(() => {
   createWindow();
+  createGlowWindow();
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+      createGlowWindow();
+    }
   });
 });
 

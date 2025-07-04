@@ -17,14 +17,26 @@ function onIpc<T>(channel: string, callback: (data: T) => void) {
 
 contextBridge.exposeInMainWorld("electron", {
   platform: process.platform,
-  transcribeAudio: (buffer: ArrayBuffer) =>
-    ipcRenderer.invoke("transcribe-audio", buffer),
+  startTranscription: () => ipcRenderer.invoke("start-transcription"),
+  sendAudioChunk: (buffer: ArrayBuffer) =>
+    ipcRenderer.send("send-audio-chunk", buffer),
+  stopTranscription: () => ipcRenderer.invoke("stop-transcription"),
+  onTranscriptionDelta: (callback: (text: string) => void) =>
+    onIpc("transcription-delta", callback),
+  onTranscriptionDone: (callback: (text: string) => void) =>
+    onIpc("transcription-done", callback),
+  onTranscriptionError: (callback: (error: string) => void) =>
+    onIpc("transcription-error", callback),
   chatWithMistral: (prompt: string) =>
     ipcRenderer.invoke("chat-with-mistral", prompt),
+  setRecordingGlow: (active: boolean) =>
+    ipcRenderer.invoke("set-recording-glow", active),
   onChatChunk: (callback: (chunk: string) => void) =>
     onIpc("chat-chunk", callback),
   onToolExecuting: (callback: (data: ToolExecutingPayload) => void) =>
     onIpc("tool-executing", callback),
   onToolResult: (callback: (data: ToolResultPayload) => void) =>
     onIpc("tool-result", callback),
+  onRecordingGlow: (callback: (active: boolean) => void) =>
+    onIpc("recording-glow", callback),
 });
