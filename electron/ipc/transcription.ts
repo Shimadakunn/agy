@@ -7,7 +7,8 @@ import { realtimeClient } from "../ai.js";
 let activeConnection: RealtimeConnection | null = null;
 
 export function registerTranscriptionHandlers(
-  getMainWindow: () => BrowserWindow | null,
+  getAppWindow: () => BrowserWindow | null,
+  getAgyWindow: () => BrowserWindow | null,
 ) {
   ipcMain.handle("start-transcription", async () => {
     if (activeConnection && !activeConnection.isClosed)
@@ -27,12 +28,13 @@ export function registerTranscriptionHandlers(
     (async () => {
       try {
         for await (const event of conn) {
-          const mainWindow = getMainWindow();
-          if (!mainWindow) break;
-          if (event.type === "transcription.text.delta" && "text" in event)
-            mainWindow.webContents.send("transcription-delta", event.text);
-          else if (event.type === "transcription.done" && "text" in event)
-            mainWindow.webContents.send("transcription-done", event.text);
+          const appWindow = getAppWindow();
+          if (!appWindow) break;
+          if (event.type === "transcription.text.delta" && "text" in event) {
+            appWindow.webContents.send("transcription-delta", event.text);
+            getAgyWindow()?.webContents.send("transcription-delta", event.text);
+          } else if (event.type === "transcription.done" && "text" in event)
+            appWindow.webContents.send("transcription-done", event.text);
           else if (event.type === "error") {
             const msg =
               "error" in event && event.error
@@ -40,12 +42,12 @@ export function registerTranscriptionHandlers(
                   ? event.error.message
                   : JSON.stringify(event.error.message)
                 : "Transcription error";
-            mainWindow.webContents.send("transcription-error", msg);
+            appWindow.webContents.send("transcription-error", msg);
             break;
           }
         }
       } catch (err) {
-        getMainWindow()?.webContents.send(
+        getAppWindow()?.webContents.send(
           "transcription-error",
           err instanceof Error ? err.message : "Transcription failed",
         );

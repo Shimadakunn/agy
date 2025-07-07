@@ -1,2 +1,2 @@
-export { createMainWindow } from "./main.js";
-export { createGlowWindow } from "./glow.js";
+export { createAppWindow } from "./app.js";
+export { createAgyWindow } from "./agy.js";

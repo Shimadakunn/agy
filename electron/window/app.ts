@@ -1,7 +1,7 @@
 import { BrowserWindow } from "electron";
 import path from "node:path";
 
-export function createMainWindow(dirname: string): BrowserWindow {
+export function createAppWindow(dirname: string): BrowserWindow {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,

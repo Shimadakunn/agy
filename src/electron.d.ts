@@ -24,6 +24,7 @@ interface Window {
     onToolExecuting(callback: (data: ToolExecutingPayload) => void): () => void;
     onToolResult(callback: (data: ToolResultPayload) => void): () => void;
     onRecordingGlow(callback: (active: boolean) => void): () => void;
+    onGlowPhase(callback: (phase: string) => void): () => void;
     onPushToTalkDown(callback: () => void): () => void;
     onPushToTalkUp(callback: () => void): () => void;
   };

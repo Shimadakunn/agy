@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld("electron", {
     onIpc("tool-result", callback),
   onRecordingGlow: (callback: (active: boolean) => void) =>
     onIpc("recording-glow", callback),
+  onGlowPhase: (callback: (phase: string) => void) =>
+    onIpc("glow-phase", callback),
   onPushToTalkDown: (callback: () => void) =>
     onIpc("push-to-talk-down", callback),
   onPushToTalkUp: (callback: () => void) => onIpc("push-to-talk-up", callback),
