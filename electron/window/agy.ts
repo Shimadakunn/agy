@@ -29,7 +29,5 @@ export function createAgyWindow(dirname: string): BrowserWindow {
     win.loadURL(`${process.env.VITE_DEV_SERVER_URL}/agy.html`);
   else win.loadFile(path.join(dirname, "../dist/agy.html"));
 
-  win.once("ready-to-show", () => win.showInactive());
-
   return win;
 }

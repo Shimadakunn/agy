@@ -27,5 +27,6 @@ interface Window {
     onGlowPhase(callback: (phase: string) => void): () => void;
     onPushToTalkDown(callback: () => void): () => void;
     onPushToTalkUp(callback: () => void): () => void;
+    hideOverlay(): void;
   };
 }

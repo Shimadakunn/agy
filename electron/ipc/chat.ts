@@ -21,6 +21,10 @@ export function registerChatHandlers(
     const sendAgy = (channel: string, ...args: unknown[]) =>
       getAgyWindow()?.webContents.send(channel, ...args);
 
+    const agyWin = getAgyWindow();
+    if (agyWin && !agyWin.isDestroyed() && !agyWin.isVisible())
+      agyWin.showInactive();
+
     sendAgy("glow-phase", "thinking");
 
     const messages: ChatCompletionStreamRequestMessages[] = [

@@ -44,4 +44,5 @@ contextBridge.exposeInMainWorld("electron", {
   onPushToTalkDown: (callback: () => void) =>
     onIpc("push-to-talk-down", callback),
   onPushToTalkUp: (callback: () => void) => onIpc("push-to-talk-up", callback),
+  hideOverlay: () => ipcRenderer.send("hide-overlay"),
 });

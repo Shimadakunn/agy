@@ -20,7 +20,14 @@ registerChatHandlers(getAppWindow, getAgyWindow);
 registerPushToTalk(getAppWindow);
 
 ipcMain.handle("set-recording-glow", (_event, active: boolean) => {
+  if (active && agyWindow && !agyWindow.isDestroyed() && !agyWindow.isVisible())
+    agyWindow.showInactive();
   agyWindow?.webContents.send("recording-glow", active);
+});
+
+ipcMain.on("hide-overlay", () => {
+  if (agyWindow && !agyWindow.isDestroyed() && agyWindow.isVisible())
+    agyWindow.hide();
 });
 
 app.whenReady().then(() => {
