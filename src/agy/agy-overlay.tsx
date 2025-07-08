@@ -80,6 +80,7 @@ export function AgyOverlay() {
           fallbackTimerRef.current = null;
         }
         if (p === "thinking") setContent("");
+        if (p !== "idle") setGlowActive(true);
         setPhase(p as Phase);
       }),
     );
@@ -113,7 +114,9 @@ export function AgyOverlay() {
 
   return (
     <>
-      <div className={`glow ${glowActive ? "active" : ""}`}>
+      <div
+        className={`glow ${glowActive ? "active" : ""} ${glowActive ? phase : ""}`}
+      >
         <div className="wave fade-mask wave-2" />
         <div className="wave fade-mask wave-1" />
         <div className="wave border-mask highlight" />

@@ -138,6 +138,36 @@ body {
 .dot:nth-child(2) { animation-delay: 0.16s; }
 .dot:nth-child(3) { animation-delay: 0.32s; }
 
+/* ─── Phase-aware glow pulsing (active = thinking/executing/responding) ─── */
+
+.glow.thinking .wave-1,
+.glow.executing .wave-1,
+.glow.responding .wave-1 {
+  animation: spin-1 3s linear infinite, glow-active 1.5s ease-in-out infinite;
+}
+
+.glow.thinking .wave-2,
+.glow.executing .wave-2,
+.glow.responding .wave-2 {
+  animation: spin-2 5s linear infinite, glow-active-ambient 1.5s ease-in-out infinite;
+}
+
+.glow.thinking .highlight,
+.glow.executing .highlight,
+.glow.responding .highlight {
+  animation: spin-1 2.5s linear infinite, glow-active 1.5s ease-in-out infinite;
+}
+
+@keyframes glow-active {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@keyframes glow-active-ambient {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 0.1; }
+}
+
 /* ─── Phase icons ─── */
 .phase-icon {
   opacity: 0.9;
