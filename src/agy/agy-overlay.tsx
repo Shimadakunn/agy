@@ -11,6 +11,7 @@ export function AgyOverlay() {
   const [phase, setPhaseState] = useState<Phase>("idle");
   const [content, setContent] = useState("");
   const [contentSource, setContentSource] = useState<Phase>("idle");
+  const [transcriptConfirmed, setTranscriptConfirmed] = useState(false);
   const [glowActive, setGlowActive] = useState(false);
   const [overlayActive, setOverlayActive] = useState(false);
 
@@ -57,6 +58,7 @@ export function AgyOverlay() {
         if (active) {
           setGlowActive(true);
           setContent("");
+          setTranscriptConfirmed(false);
           setContentSource("recording");
           setPhase("recording");
         } else {
@@ -70,6 +72,21 @@ export function AgyOverlay() {
     cleanups.push(
       window.electron.onTranscriptionDelta((text) => {
         if (phaseRef.current === "recording") setContent((prev) => prev + text);
+      }),
+    );
+
+    cleanups.push(
+      window.electron.onTranscriptionConfirmed((text) => {
+        console.log("[overlay] transcription-confirmed:", text);
+        setContent(text);
+        setTranscriptConfirmed(true);
+      }),
+    );
+
+    cleanups.push(
+      window.electron.onTranscriptionConfirmedError(() => {
+        console.log("[overlay] transcription-confirmed-error (fallback)");
+        setTranscriptConfirmed(true);
       }),
     );
 
@@ -166,7 +183,15 @@ export function AgyOverlay() {
                 </ReactMarkdown>
               </div>
             ) : (
-              <p className="wrap-break-word whitespace-pre-wrap">{content}</p>
+              <p
+                className={`wrap-break-word whitespace-pre-wrap transition-colors duration-300 ${
+                  contentSource === "recording" && !transcriptConfirmed
+                    ? "text-muted-foreground"
+                    : "text-foreground"
+                }`}
+              >
+                {content}
+              </p>
             )}
           </div>
         ) : null}

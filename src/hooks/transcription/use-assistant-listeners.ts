@@ -10,11 +10,14 @@ export function useAssistantListeners(
   setStatus: Dispatch<SetStateAction<Status>>,
 ) {
   useEffect(() => {
+    let realtimeText = "";
+
     const removeDelta = window.electron.onTranscriptionDelta((text) => {
       setTranscript((prev) => prev + text);
     });
 
-    const removeDone = window.electron.onTranscriptionDone(async (text) => {
+    const removeDone = window.electron.onTranscriptionDone((text) => {
+      realtimeText = text;
       setTranscript(text);
 
       if (!text.trim()) {
@@ -23,18 +26,46 @@ export function useAssistantListeners(
         return;
       }
 
-      setAiResponse("");
-      setToolActions([]);
-      setStatus("generating");
-
-      try {
-        await window.electron.chatWithMistral(text);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Chat failed.");
-      } finally {
-        setStatus("idle");
-      }
+      setStatus("confirming");
     });
+
+    const removeConfirmed = window.electron.onTranscriptionConfirmed(
+      async (text) => {
+        setTranscript(text);
+
+        // Brief pause so the user can see the confirmed (white) text
+        // before transitioning to the thinking/generating phase
+        await new Promise((r) => setTimeout(r, 800));
+
+        setAiResponse("");
+        setToolActions([]);
+        setStatus("generating");
+
+        try {
+          await window.electron.chatWithMistral(text);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Chat failed.");
+        } finally {
+          setStatus("idle");
+        }
+      },
+    );
+
+    const removeConfirmedError = window.electron.onTranscriptionConfirmedError(
+      async () => {
+        setAiResponse("");
+        setToolActions([]);
+        setStatus("generating");
+
+        try {
+          await window.electron.chatWithMistral(realtimeText);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Chat failed.");
+        } finally {
+          setStatus("idle");
+        }
+      },
+    );
 
     const removeTranscriptionError = window.electron.onTranscriptionError(
       (msg) => {
@@ -78,6 +109,8 @@ export function useAssistantListeners(
     return () => {
       removeDelta();
       removeDone();
+      removeConfirmed();
+      removeConfirmedError();
       removeTranscriptionError();
       removeChatChunk();
       removeToolExecuting();

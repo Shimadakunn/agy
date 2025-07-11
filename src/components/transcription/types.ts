@@ -1,4 +1,9 @@
-export type Status = "idle" | "recording" | "finalizing" | "generating";
+export type Status =
+  | "idle"
+  | "recording"
+  | "finalizing"
+  | "confirming"
+  | "generating";
 
 export type AudioDevice = { label: string; value: string };
 

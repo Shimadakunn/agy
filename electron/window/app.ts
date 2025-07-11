@@ -3,8 +3,13 @@ import path from "node:path";
 
 export function createAppWindow(dirname: string): BrowserWindow {
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 640,
+    height: 460,
+    minWidth: 520,
+    minHeight: 380,
+    title: "Agy",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    trafficLightPosition: { x: 16, y: 18 },
     webPreferences: {
       preload: path.join(dirname, "preload.mjs"),
     },

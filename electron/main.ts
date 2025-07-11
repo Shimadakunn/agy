@@ -1,11 +1,18 @@
 import "dotenv/config";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, nativeTheme } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAppWindow, createAgyWindow } from "./window/index.js";
 import { registerTranscriptionHandlers } from "./ipc/transcription.js";
 import { registerChatHandlers } from "./ipc/chat.js";
-import { registerPushToTalk, stopPushToTalk } from "./push-to-talk.js";
+import { registerSettingsHandlers } from "./ipc/settings.js";
+import { registerPermissionsHandlers } from "./ipc/permissions.js";
+import {
+  registerPushToTalk,
+  setPushToTalkKey,
+  stopPushToTalk,
+} from "./push-to-talk.js";
+import { loadSettings } from "./settings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,6 +24,8 @@ const getAgyWindow = () => agyWindow;
 
 registerTranscriptionHandlers(getAppWindow, getAgyWindow);
 registerChatHandlers(getAppWindow, getAgyWindow);
+registerSettingsHandlers();
+registerPermissionsHandlers();
 registerPushToTalk(getAppWindow);
 
 ipcMain.handle("set-recording-glow", (_event, active: boolean) => {
@@ -31,6 +40,10 @@ ipcMain.on("hide-overlay", () => {
 });
 
 app.whenReady().then(() => {
+  const settings = loadSettings();
+  nativeTheme.themeSource = settings.appearance.theme;
+  setPushToTalkKey(settings.hotkey.keycode);
+
   appWindow = createAppWindow(__dirname);
   agyWindow = createAgyWindow(__dirname);
 
