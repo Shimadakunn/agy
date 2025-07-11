@@ -53,7 +53,9 @@ interface Window {
     stopTranscription(): Promise<void>;
     onTranscriptionDelta(callback: (text: string) => void): () => void;
     onTranscriptionDone(callback: (text: string) => void): () => void;
-    onTranscriptionConfirmed(callback: (text: string) => void): () => void;
+    onTranscriptionConfirmed(
+      callback: (text: string, isFinal: boolean) => void,
+    ): () => void;
     onTranscriptionConfirmedError(callback: () => void): () => void;
     onTranscriptionError(callback: (error: string) => void): () => void;
 

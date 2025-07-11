@@ -30,8 +30,10 @@ export function useAssistantListeners(
     });
 
     const removeConfirmed = window.electron.onTranscriptionConfirmed(
-      async (text) => {
+      async (text, isFinal) => {
         setTranscript(text);
+
+        if (!isFinal) return;
 
         // Brief pause so the user can see the confirmed (white) text
         // before transitioning to the thinking/generating phase

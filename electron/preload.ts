@@ -28,8 +28,19 @@ contextBridge.exposeInMainWorld("electron", {
     onIpc("transcription-delta", callback),
   onTranscriptionDone: (callback: (text: string) => void) =>
     onIpc("transcription-done", callback),
-  onTranscriptionConfirmed: (callback: (text: string) => void) =>
-    onIpc("transcription-confirmed", callback),
+  onTranscriptionConfirmed: (
+    callback: (text: string, isFinal: boolean) => void,
+  ) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      text: string,
+      isFinal: boolean,
+    ) => callback(text, isFinal);
+    ipcRenderer.on("transcription-confirmed", handler);
+    return () => {
+      ipcRenderer.removeListener("transcription-confirmed", handler);
+    };
+  },
   onTranscriptionConfirmedError: (callback: () => void) =>
     onIpc("transcription-confirmed-error", callback),
   onTranscriptionError: (callback: (error: string) => void) =>

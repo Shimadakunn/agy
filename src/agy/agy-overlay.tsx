@@ -11,7 +11,8 @@ export function AgyOverlay() {
   const [phase, setPhaseState] = useState<Phase>("idle");
   const [content, setContent] = useState("");
   const [contentSource, setContentSource] = useState<Phase>("idle");
-  const [transcriptConfirmed, setTranscriptConfirmed] = useState(false);
+  const [confirmedText, setConfirmedText] = useState("");
+  const [pendingText, setPendingText] = useState("");
   const [glowActive, setGlowActive] = useState(false);
   const [overlayActive, setOverlayActive] = useState(false);
 
@@ -58,7 +59,8 @@ export function AgyOverlay() {
         if (active) {
           setGlowActive(true);
           setContent("");
-          setTranscriptConfirmed(false);
+          setConfirmedText("");
+          setPendingText("");
           setContentSource("recording");
           setPhase("recording");
         } else {
@@ -71,22 +73,26 @@ export function AgyOverlay() {
 
     cleanups.push(
       window.electron.onTranscriptionDelta((text) => {
-        if (phaseRef.current === "recording") setContent((prev) => prev + text);
+        if (phaseRef.current === "recording")
+          setPendingText((prev) => prev + text);
       }),
     );
 
     cleanups.push(
       window.electron.onTranscriptionConfirmed((text) => {
-        console.log("[overlay] transcription-confirmed:", text);
-        setContent(text);
-        setTranscriptConfirmed(true);
+        console.log("[overlay] confirmed:", text);
+        setConfirmedText(text);
+        setPendingText("");
       }),
     );
 
     cleanups.push(
       window.electron.onTranscriptionConfirmedError(() => {
-        console.log("[overlay] transcription-confirmed-error (fallback)");
-        setTranscriptConfirmed(true);
+        // Final batch failed — promote pending to confirmed as fallback
+        setPendingText((prev) => {
+          setConfirmedText((c) => c + prev);
+          return "";
+        });
       }),
     );
 
@@ -96,7 +102,11 @@ export function AgyOverlay() {
           clearTimeout(fallbackTimerRef.current);
           fallbackTimerRef.current = null;
         }
-        if (p === "thinking") setContent("");
+        if (p === "thinking") {
+          setContent("");
+          setConfirmedText("");
+          setPendingText("");
+        }
         if (p !== "idle") setGlowActive(true);
         setPhase(p as Phase);
       }),
@@ -163,6 +173,21 @@ export function AgyOverlay() {
               {content}
             </p>
           </div>
+        ) : contentSource === "recording" && (confirmedText || pendingText) ? (
+          <div className="flex items-start gap-2.5 text-left">
+            <Mic
+              className="phase-icon text-emerald-400 shrink-0 mt-0.5"
+              size={16}
+            />
+            <p className="wrap-break-word whitespace-pre-wrap">
+              {confirmedText && (
+                <span className="text-foreground">{confirmedText}</span>
+              )}
+              {pendingText && (
+                <span className="text-muted-foreground">{pendingText}</span>
+              )}
+            </p>
+          </div>
         ) : content ? (
           <div className="flex items-start gap-2.5 text-left">
             {contentSource === "responding" ? (
@@ -183,13 +208,7 @@ export function AgyOverlay() {
                 </ReactMarkdown>
               </div>
             ) : (
-              <p
-                className={`wrap-break-word whitespace-pre-wrap transition-colors duration-300 ${
-                  contentSource === "recording" && !transcriptConfirmed
-                    ? "text-muted-foreground"
-                    : "text-foreground"
-                }`}
-              >
+              <p className="wrap-break-word whitespace-pre-wrap text-foreground">
                 {content}
               </p>
             )}

@@ -6,6 +6,10 @@ import { mistral, realtimeClient } from "../ai.js";
 
 let activeConnection: RealtimeConnection | null = null;
 let audioChunks: Buffer[] = [];
+let batchInterval: ReturnType<typeof setInterval> | null = null;
+let batchInFlight = false;
+
+const BATCH_INTERVAL_MS = 3000;
 
 function createWavBuffer(pcmData: Buffer): Uint8Array {
   const sampleRate = 16000;
@@ -37,6 +41,49 @@ function createWavBuffer(pcmData: Buffer): Uint8Array {
   return new Uint8Array(buffer);
 }
 
+function sendBatch(
+  getAppWindow: () => BrowserWindow | null,
+  getAgyWindow: () => BrowserWindow | null,
+  wavData: Uint8Array,
+  isFinal: boolean,
+) {
+  mistral.audio.transcriptions
+    .complete({
+      model: "voxtral-mini-latest",
+      file: { fileName: "recording.wav", content: wavData },
+    })
+    .then((result) => {
+      batchInFlight = false;
+      console.log(`[batch${isFinal ? " final" : ""}] Confirmed:`, result.text);
+      getAppWindow()?.webContents.send(
+        "transcription-confirmed",
+        result.text,
+        isFinal,
+      );
+      getAgyWindow()?.webContents.send(
+        "transcription-confirmed",
+        result.text,
+        isFinal,
+      );
+    })
+    .catch((err) => {
+      batchInFlight = false;
+      console.error(`[batch${isFinal ? " final" : ""}] Failed:`, err);
+      if (isFinal) {
+        getAppWindow()?.webContents.send("transcription-confirmed-error");
+        getAgyWindow()?.webContents.send("transcription-confirmed-error");
+      }
+    });
+}
+
+function clearBatchInterval() {
+  if (batchInterval) {
+    clearInterval(batchInterval);
+    batchInterval = null;
+  }
+  batchInFlight = false;
+}
+
 export function registerTranscriptionHandlers(
   getAppWindow: () => BrowserWindow | null,
   getAgyWindow: () => BrowserWindow | null,
@@ -45,6 +92,7 @@ export function registerTranscriptionHandlers(
     if (activeConnection && !activeConnection.isClosed)
       await activeConnection.close();
 
+    clearBatchInterval();
     audioChunks = [];
 
     activeConnection = await realtimeClient.connect(
@@ -89,6 +137,15 @@ export function registerTranscriptionHandlers(
         if (activeConnection === conn) activeConnection = null;
       }
     })();
+
+    // Periodic batch confirmations while recording
+    batchInterval = setInterval(() => {
+      if (audioChunks.length === 0 || batchInFlight) return;
+      batchInFlight = true;
+      const pcmData = Buffer.concat(audioChunks);
+      const wavData = createWavBuffer(pcmData);
+      sendBatch(getAppWindow, getAgyWindow, wavData, false);
+    }, BATCH_INTERVAL_MS);
   });
 
   ipcMain.on("send-audio-chunk", (_event, chunk: ArrayBuffer) => {
@@ -102,6 +159,8 @@ export function registerTranscriptionHandlers(
   });
 
   ipcMain.handle("stop-transcription", async () => {
+    clearBatchInterval();
+
     if (activeConnection && !activeConnection.isClosed)
       await activeConnection.endAudio();
 
@@ -113,29 +172,6 @@ export function registerTranscriptionHandlers(
     const pcmData = Buffer.concat(chunks);
     const wavData = createWavBuffer(pcmData);
 
-    // Fire-and-forget: batch re-transcription runs in background,
-    // result delivered via IPC events
-    (async () => {
-      const appWindow = getAppWindow();
-      if (!appWindow) return;
-
-      try {
-        console.log("[batch] Starting batch transcription…");
-        const result = await mistral.audio.transcriptions.complete({
-          model: "voxtral-mini-latest",
-          file: { fileName: "recording.wav", content: wavData },
-        });
-        console.log("[batch] Confirmed text:", result.text);
-        appWindow.webContents.send("transcription-confirmed", result.text);
-        getAgyWindow()?.webContents.send(
-          "transcription-confirmed",
-          result.text,
-        );
-      } catch (err) {
-        console.error("[batch] Batch transcription failed, falling back:", err);
-        appWindow.webContents.send("transcription-confirmed-error");
-        getAgyWindow()?.webContents.send("transcription-confirmed-error");
-      }
-    })();
+    sendBatch(getAppWindow, getAgyWindow, wavData, true);
   });
 }
