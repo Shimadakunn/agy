@@ -7,10 +7,15 @@ import "./markdown.css";
 
 type Phase = "idle" | "recording" | "thinking" | "executing" | "responding";
 
+type Message = {
+  id: number;
+  type: "user" | "tool" | "assistant";
+  content: string;
+};
+
 export function AgyOverlay() {
   const [phase, setPhaseState] = useState<Phase>("idle");
-  const [content, setContent] = useState("");
-  const [contentSource, setContentSource] = useState<Phase>("idle");
+  const [messages, setMessages] = useState<Message[]>([]);
   const [confirmedText, setConfirmedText] = useState("");
   const [pendingText, setPendingText] = useState("");
   const [glowActive, setGlowActive] = useState(false);
@@ -20,6 +25,17 @@ export function AgyOverlay() {
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const phaseRef = useRef<Phase>("idle");
+  const confirmedTextRef = useRef("");
+  const pendingTextRef = useRef("");
+  const nextIdRef = useRef(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when content changes
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, confirmedText, pendingText, phase]);
 
   const setPhase = useCallback((p: Phase) => {
     phaseRef.current = p;
@@ -58,10 +74,12 @@ export function AgyOverlay() {
         }
         if (active) {
           setGlowActive(true);
-          setContent("");
+          setMessages([]);
+          confirmedTextRef.current = "";
+          pendingTextRef.current = "";
           setConfirmedText("");
           setPendingText("");
-          setContentSource("recording");
+          nextIdRef.current = 0;
           setPhase("recording");
         } else {
           fallbackTimerRef.current = setTimeout(() => {
@@ -73,14 +91,18 @@ export function AgyOverlay() {
 
     cleanups.push(
       window.electron.onTranscriptionDelta((text) => {
-        if (phaseRef.current === "recording")
-          setPendingText((prev) => prev + text);
+        if (phaseRef.current === "recording") {
+          pendingTextRef.current += text;
+          setPendingText(pendingTextRef.current);
+        }
       }),
     );
 
     cleanups.push(
       window.electron.onTranscriptionConfirmed((text) => {
         console.log("[overlay] confirmed:", text);
+        confirmedTextRef.current = text;
+        pendingTextRef.current = "";
         setConfirmedText(text);
         setPendingText("");
       }),
@@ -89,10 +111,10 @@ export function AgyOverlay() {
     cleanups.push(
       window.electron.onTranscriptionConfirmedError(() => {
         // Final batch failed — promote pending to confirmed as fallback
-        setPendingText((prev) => {
-          setConfirmedText((c) => c + prev);
-          return "";
-        });
+        confirmedTextRef.current += pendingTextRef.current;
+        pendingTextRef.current = "";
+        setConfirmedText(confirmedTextRef.current);
+        setPendingText("");
       }),
     );
 
@@ -103,9 +125,21 @@ export function AgyOverlay() {
           fallbackTimerRef.current = null;
         }
         if (p === "thinking") {
-          setContent("");
+          // Finalize user message from transcription before clearing
+          const userText = (
+            confirmedTextRef.current + pendingTextRef.current
+          ).trim();
+          confirmedTextRef.current = "";
+          pendingTextRef.current = "";
           setConfirmedText("");
           setPendingText("");
+          if (userText) {
+            const id = nextIdRef.current++;
+            setMessages((msgs) => [
+              ...msgs,
+              { id, type: "user", content: userText },
+            ]);
+          }
         }
         if (p !== "idle") setGlowActive(true);
         setPhase(p as Phase);
@@ -117,8 +151,10 @@ export function AgyOverlay() {
         const formatted = data.name
           .replace(/_/g, " ")
           .replace(/\b\w/g, (c) => c.toUpperCase());
-        setContent(formatted + "...");
-        setContentSource("executing");
+        setMessages((msgs) => [
+          ...msgs,
+          { id: nextIdRef.current++, type: "tool", content: formatted + "..." },
+        ]);
         setPhase("executing");
       }),
     );
@@ -127,17 +163,36 @@ export function AgyOverlay() {
       window.electron.onChatChunk((chunk) => {
         const current = phaseRef.current;
         if (current === "thinking" || current === "executing") {
-          setContent(chunk);
-          setContentSource("responding");
+          // First chunk — new assistant message
+          setMessages((msgs) => [
+            ...msgs,
+            { id: nextIdRef.current++, type: "assistant", content: chunk },
+          ]);
           setPhase("responding");
         } else {
-          setContent((prev) => prev + chunk);
+          // Append to last assistant message
+          setMessages((msgs) => {
+            const last = msgs[msgs.length - 1];
+            if (last && last.type === "assistant") {
+              return [
+                ...msgs.slice(0, -1),
+                { ...last, content: last.content + chunk },
+              ];
+            }
+            return [
+              ...msgs,
+              { id: nextIdRef.current++, type: "assistant", content: chunk },
+            ];
+          });
         }
       }),
     );
 
     return () => cleanups.forEach((fn) => fn());
   }, [setPhase]);
+
+  const showRecording = phase === "recording" && (confirmedText || pendingText);
+  const hasContent = messages.length > 0 || showRecording || phase === "thinking";
 
   return (
     <>
@@ -151,69 +206,82 @@ export function AgyOverlay() {
 
       <div
         className={`fixed bottom-[10%] left-1/2 -translate-x-1/2 max-w-[520px] min-w-20 px-5 py-2.5 bg-background/80 backdrop-blur-xl rounded-2xl border border-border shadow-[0_8px_32px_rgba(0,0,0,0.5)] text-foreground text-sm leading-relaxed pointer-events-none z-10 transition-all duration-500 ${
-          overlayActive
+          overlayActive && hasContent
             ? "opacity-100 translate-y-0"
             : "opacity-0 translate-y-2.5"
         }`}
       >
-        {phase === "thinking" ? (
-          <div className="flex gap-2 justify-center items-center py-1">
-            <span className="dot" />
-            <span className="dot" />
-            <span className="dot" />
-          </div>
-        ) : phase === "executing" && content ? (
-          <div className="flex items-center gap-2.5">
-            <Cog
-              className="phase-icon text-blue-400 shrink-0 animate-spin"
-              size={16}
-              style={{ animationDuration: "2s" }}
-            />
-            <p className="wrap-break-word whitespace-pre-wrap text-blue-300/80">
-              {content}
-            </p>
-          </div>
-        ) : contentSource === "recording" && (confirmedText || pendingText) ? (
-          <div className="flex items-start gap-2.5 text-left">
-            <Mic
-              className="phase-icon text-emerald-400 shrink-0 mt-0.5"
-              size={16}
-            />
-            <p className="wrap-break-word whitespace-pre-wrap">
-              {confirmedText && (
-                <span className="text-foreground">{confirmedText}</span>
+        <div
+          ref={scrollRef}
+          className="message-scroll max-h-[300px] overflow-y-auto pointer-events-auto flex flex-col gap-2.5"
+        >
+          {messages.map((msg) => (
+            <div key={msg.id}>
+              {msg.type === "user" && (
+                <div className="flex items-start gap-2.5 text-left">
+                  <Mic
+                    className="phase-icon text-emerald-400 shrink-0 mt-0.5"
+                    size={16}
+                  />
+                  <p className="wrap-break-word whitespace-pre-wrap text-foreground">
+                    {msg.content}
+                  </p>
+                </div>
               )}
-              {pendingText && (
-                <span className="text-muted-foreground">{pendingText}</span>
+              {msg.type === "tool" && (
+                <div className="flex items-center gap-2.5">
+                  <Cog
+                    className="phase-icon text-blue-400 shrink-0"
+                    size={16}
+                  />
+                  <p className="wrap-break-word whitespace-pre-wrap text-blue-300/80">
+                    {msg.content}
+                  </p>
+                </div>
               )}
-            </p>
-          </div>
-        ) : content ? (
-          <div className="flex items-start gap-2.5 text-left">
-            {contentSource === "responding" ? (
-              <Sparkles
-                className="phase-icon text-violet-400 shrink-0 mt-0.5"
-                size={16}
-              />
-            ) : (
+              {msg.type === "assistant" && (
+                <div className="flex items-start gap-2.5 text-left">
+                  <Sparkles
+                    className="phase-icon text-violet-400 shrink-0 mt-0.5"
+                    size={16}
+                  />
+                  <div className="markdown-content min-w-0">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+
+          {/* Live transcription during recording */}
+          {showRecording && (
+            <div className="flex items-start gap-2.5 text-left">
               <Mic
                 className="phase-icon text-emerald-400 shrink-0 mt-0.5"
                 size={16}
               />
-            )}
-            {contentSource === "responding" ? (
-              <div className="markdown-content min-w-0">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {content}
-                </ReactMarkdown>
-              </div>
-            ) : (
-              <p className="wrap-break-word whitespace-pre-wrap text-foreground">
-                {content}
+              <p className="wrap-break-word whitespace-pre-wrap">
+                {confirmedText && (
+                  <span className="text-foreground">{confirmedText}</span>
+                )}
+                {pendingText && (
+                  <span className="text-muted-foreground">{pendingText}</span>
+                )}
               </p>
-            )}
-          </div>
-        ) : null}
+            </div>
+          )}
+
+          {/* Thinking dots */}
+          {phase === "thinking" && (
+            <div className="flex gap-2 justify-center items-center py-1">
+              <span className="dot" />
+              <span className="dot" />
+              <span className="dot" />
+            </div>
+          )}
+        </div>
       </div>
     </>
   );
