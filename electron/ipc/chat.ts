@@ -10,6 +10,7 @@ import {
 } from "../ai.js";
 import { toolDefinitions, executeTool } from "../tools.js";
 import { captureContext } from "../context.js";
+import { showAgyOnCursorDisplay } from "../window/agy.js";
 
 export function registerChatHandlers(
   getAppWindow: () => BrowserWindow | null,
@@ -24,7 +25,7 @@ export function registerChatHandlers(
 
     const agyWin = getAgyWindow();
     if (agyWin && !agyWin.isDestroyed() && !agyWin.isVisible())
-      agyWin.showInactive();
+      showAgyOnCursorDisplay(agyWin);
 
     sendAgy("glow-phase", "thinking");
 

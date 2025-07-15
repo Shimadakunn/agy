@@ -1,2 +1,2 @@
 export { createAppWindow } from "./app.js";
-export { createAgyWindow } from "./agy.js";
+export { createAgyWindow, showAgyOnCursorDisplay } from "./agy.js";

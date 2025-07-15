@@ -2,7 +2,7 @@ import "dotenv/config";
 import { app, BrowserWindow, ipcMain, nativeTheme } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAppWindow, createAgyWindow } from "./window/index.js";
+import { createAppWindow, createAgyWindow, showAgyOnCursorDisplay } from "./window/index.js";
 import { registerTranscriptionHandlers } from "./ipc/transcription.js";
 import { registerChatHandlers } from "./ipc/chat.js";
 import { registerSettingsHandlers } from "./ipc/settings.js";
@@ -30,7 +30,7 @@ registerPushToTalk(getAppWindow);
 
 ipcMain.handle("set-recording-glow", (_event, active: boolean) => {
   if (active && agyWindow && !agyWindow.isDestroyed() && !agyWindow.isVisible())
-    agyWindow.showInactive();
+    showAgyOnCursorDisplay(agyWindow);
   agyWindow?.webContents.send("recording-glow", active);
 });
 

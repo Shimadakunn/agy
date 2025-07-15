@@ -32,3 +32,15 @@ export function createAgyWindow(dirname: string): BrowserWindow {
 
   return win;
 }
+
+/**
+ * Reposition the overlay to the display where the cursor is and show it.
+ */
+export function showAgyOnCursorDisplay(win: BrowserWindow): void {
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor);
+  const { x, y, width, height } = display.bounds;
+
+  win.setBounds({ x, y, width, height });
+  win.showInactive();
+}

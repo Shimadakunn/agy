@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
+import { screen } from "electron";
 import { runAppleScript } from "./tools.js";
 
 const execFile = promisify(execFileCb);
@@ -97,8 +98,18 @@ interface ScreenCapture {
 }
 
 async function captureScreen(): Promise<ScreenCapture> {
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor);
+  const { x, y, width, height } = display.bounds;
+
   const filePath = path.join(tmpdir(), `agy-ctx-${Date.now()}.png`);
-  await execFile("screencapture", ["-x", "-C", filePath]);
+  await execFile("screencapture", [
+    "-x",
+    "-C",
+    "-R",
+    `${x},${y},${width},${height}`,
+    filePath,
+  ]);
   const buf = await readFile(filePath);
   return { base64: buf.toString("base64"), filePath };
 }
