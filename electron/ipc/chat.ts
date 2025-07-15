@@ -9,6 +9,7 @@ import {
   parseToolCallArgs,
 } from "../ai.js";
 import { toolDefinitions, executeTool } from "../tools.js";
+import { captureContext } from "../context.js";
 
 export function registerChatHandlers(
   getAppWindow: () => BrowserWindow | null,
@@ -27,9 +28,23 @@ export function registerChatHandlers(
 
     sendAgy("glow-phase", "thinking");
 
+    // Capture context (overlay is content-protected, won't appear in screenshot)
+    const ctx = await captureContext();
+
     const messages: ChatCompletionStreamRequestMessages[] = [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: prompt },
+      { role: "system", content: SYSTEM_PROMPT + "\n\n" + ctx.text },
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url" as const,
+            imageUrl: {
+              url: `data:image/png;base64,${ctx.screenshotBase64}`,
+            },
+          },
+          { type: "text" as const, text: prompt },
+        ],
+      },
     ];
 
     try {

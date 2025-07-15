@@ -240,7 +240,7 @@ export const toolDefinitions: Tool[] = [
 
 type ToolArgs = Record<string, unknown>;
 
-async function runAppleScript(script: string): Promise<string> {
+export async function runAppleScript(script: string): Promise<string> {
   const { stdout } = await execFile("osascript", ["-e", script]);
   return stdout.trim();
 }

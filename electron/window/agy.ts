@@ -24,6 +24,7 @@ export function createAgyWindow(dirname: string): BrowserWindow {
   win.setAlwaysOnTop(true, "screen-saver");
   win.setIgnoreMouseEvents(true);
   win.setVisibleOnAllWorkspaces(true);
+  win.setContentProtection(true);
 
   if (process.env.VITE_DEV_SERVER_URL)
     win.loadURL(`${process.env.VITE_DEV_SERVER_URL}/agy.html`);
