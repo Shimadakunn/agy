@@ -12,3 +12,5 @@ It is a next generation Artificial General Inteligence.
 npm i
 npm run dev
 ```
+# Appli
+Rester appuyer sur `ALT` gauche puis parler. Lacher quand fini
